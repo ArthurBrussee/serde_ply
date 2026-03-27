@@ -822,11 +822,15 @@ impl<W: Write> Serializer for &mut ListPropertyCollector<'_, W> {
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Err(SerializeError::custom(
+            "Unit values are not supported in PLY lists",
+        ))
     }
 
     fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Err(SerializeError::custom(
+            "Unit structs are not supported in PLY lists",
+        ))
     }
 
     fn serialize_unit_variant(
@@ -835,7 +839,9 @@ impl<W: Write> Serializer for &mut ListPropertyCollector<'_, W> {
         _variant_index: u32,
         _variant: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Err(SerializeError::custom(
+            "Unit variants are not supported in PLY lists",
+        ))
     }
 
     fn serialize_newtype_struct<T>(
@@ -846,7 +852,9 @@ impl<W: Write> Serializer for &mut ListPropertyCollector<'_, W> {
     where
         T: ?Sized + Serialize,
     {
-        todo!()
+        Err(SerializeError::custom(
+            "Newtype structs are not supported in PLY lists",
+        ))
     }
 
     fn serialize_newtype_variant<T>(
@@ -859,15 +867,21 @@ impl<W: Write> Serializer for &mut ListPropertyCollector<'_, W> {
     where
         T: ?Sized + Serialize,
     {
-        todo!()
+        Err(SerializeError::custom(
+            "Newtype variants are not supported in PLY lists",
+        ))
     }
 
     fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        todo!()
+        Err(SerializeError::custom(
+            "Nested sequences are not supported in PLY lists",
+        ))
     }
 
     fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        todo!()
+        Err(SerializeError::custom(
+            "Tuples are not supported in PLY lists",
+        ))
     }
 
     fn serialize_tuple_struct(
@@ -875,7 +889,9 @@ impl<W: Write> Serializer for &mut ListPropertyCollector<'_, W> {
         _name: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        todo!()
+        Err(SerializeError::custom(
+            "Tuple structs are not supported in PLY lists",
+        ))
     }
 
     fn serialize_tuple_variant(
@@ -885,11 +901,15 @@ impl<W: Write> Serializer for &mut ListPropertyCollector<'_, W> {
         _variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        todo!()
+        Err(SerializeError::custom(
+            "Tuple variants are not supported in PLY lists",
+        ))
     }
 
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        todo!()
+        Err(SerializeError::custom(
+            "Maps are not supported in PLY lists",
+        ))
     }
 
     fn serialize_struct(
@@ -897,7 +917,9 @@ impl<W: Write> Serializer for &mut ListPropertyCollector<'_, W> {
         _name: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        todo!()
+        Err(SerializeError::custom(
+            "Structs are not supported in PLY lists",
+        ))
     }
 
     fn serialize_struct_variant(
@@ -907,7 +929,9 @@ impl<W: Write> Serializer for &mut ListPropertyCollector<'_, W> {
         _variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        todo!()
+        Err(SerializeError::custom(
+            "Struct variants are not supported in PLY lists",
+        ))
     }
 }
 

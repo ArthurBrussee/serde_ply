@@ -5,21 +5,93 @@ use std::{
     io::{BufReader, Cursor},
 };
 
+// ---- Header parsing edge case tests ----
+
+#[test]
+fn test_missing_ply_magic() {
+    let data = "format ascii 1.0\nelement vertex 1\nproperty float x\nend_header\n1.0\n";
+    let result = PlyReader::from_reader(Cursor::new(data));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_missing_format() {
+    let data = "ply\nelement vertex 1\nproperty float x\nend_header\n1.0\n";
+    let result = PlyReader::from_reader(Cursor::new(data));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_unknown_format() {
+    let data = "ply\nformat binary_mixed 1.0\nelement vertex 1\nproperty float x\nend_header\n1.0\n";
+    let result = PlyReader::from_reader(Cursor::new(data));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_invalid_scalar_type() {
+    let data = "ply\nformat ascii 1.0\nelement vertex 1\nproperty bigint x\nend_header\n1\n";
+    let result = PlyReader::from_reader(Cursor::new(data));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_property_before_element() {
+    let data = "ply\nformat ascii 1.0\nproperty float x\nelement vertex 1\nend_header\n1.0\n";
+    let result = PlyReader::from_reader(Cursor::new(data));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_invalid_element_count() {
+    let data = "ply\nformat ascii 1.0\nelement vertex abc\nproperty float x\nend_header\n";
+    let result = PlyReader::from_reader(Cursor::new(data));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_truncated_header() {
+    let data = "ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\n";
+    let result = PlyReader::from_reader(Cursor::new(data));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_header_accessors() {
+    let data = "ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nelement face 0\nproperty list uchar uint idx\nend_header\n1.0 2.0\n";
+    let reader = PlyReader::from_reader(Cursor::new(data)).unwrap();
+    let header = reader.header();
+
+    assert!(header.has_element("vertex"));
+    assert!(header.has_element("face"));
+    assert!(!header.has_element("edge"));
+
+    let vertex_def = header.get_element("vertex").unwrap();
+    assert_eq!(vertex_def.count, 1);
+    assert!(vertex_def.has_property("x"));
+    assert!(vertex_def.has_property("y"));
+    assert!(!vertex_def.has_property("z"));
+    assert!(vertex_def.get_property("x").is_some());
+    assert!(header.get_element("nonexistent").is_none());
+}
+
+#[test]
+fn test_obj_info_and_comments() {
+    let data = "ply\nformat ascii 1.0\ncomment hello world\ncomment second line\nobj_info num_rows 5\nelement vertex 0\nproperty float x\nend_header\n";
+    let reader = PlyReader::from_reader(Cursor::new(data)).unwrap();
+    let header = reader.header();
+    assert_eq!(header.comments.len(), 2);
+    assert_eq!(header.comments[0], "hello world");
+    assert_eq!(header.comments[1], "second line");
+    assert_eq!(header.obj_info.len(), 1);
+    assert_eq!(header.obj_info[0], "num_rows 5");
+}
+
 #[derive(Deserialize, Debug, PartialEq)]
 struct Vertex {
     x: f32,
     y: f32,
     z: f32,
-}
-
-#[derive(Deserialize, Debug, PartialEq)]
-struct VertexWithNormal {
-    x: f32,
-    y: f32,
-    z: f32,
-    nx: f32,
-    ny: f32,
-    nz: f32,
 }
 
 #[derive(Deserialize, Debug, PartialEq)]

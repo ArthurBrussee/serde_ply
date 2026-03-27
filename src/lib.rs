@@ -58,7 +58,7 @@ use std::str::FromStr;
 /// PLY file format encoding.
 ///
 /// Determines how data is stored in the PLY file - as text or binary with specific byte ordering.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlyFormat {
     /// Plain text format
     Ascii,
@@ -82,7 +82,7 @@ impl fmt::Display for PlyFormat {
 ///
 /// Maps PLY type names to Rust types. PLY supports both canonical names
 /// (like `float32`) and legacy aliases (like `float`).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ScalarType {
     I8,
     U8,
@@ -225,7 +225,7 @@ impl PlyHeader {
             // We have reached the end of the header. Don't really care
             // about whitespace here, BUT we do have to be sure that the newline IS present.
             // If its not, the line ends at EOF, and the next chunk of data could then incorrectly contain this newline.
-            if line.trim() == "end_header" && line.ends_with("\n") {
+            if line.trim() == "end_header" && line.ends_with('\n') {
                 break;
             }
             let parts: Vec<&str> = line.split_whitespace().collect();
@@ -349,8 +349,8 @@ impl PlyHeader {
     }
 
     /// Find an element definition by name.
-    pub fn get_element(&self, name: &str) -> Option<ElementDef> {
-        self.elem_defs.iter().find(|e| e.name == name).cloned()
+    pub fn get_element(&self, name: &str) -> Option<&ElementDef> {
+        self.elem_defs.iter().find(|e| e.name == name)
     }
 
     /// Check if the header contains an element with the given name.

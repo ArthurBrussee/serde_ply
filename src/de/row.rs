@@ -10,7 +10,7 @@ use std::{io::Read, marker::PhantomData};
 pub(crate) struct RowDeserializer<'a, R: Read, S: ScalarReader> {
     pub reader: &'a mut R,
     properties: &'a [PlyProperty],
-    current_property: u32,
+    current_property: usize,
     _marker: PhantomData<S>,
 }
 
@@ -83,7 +83,7 @@ impl<'de, R: Read, S: ScalarReader> MapAccess<'de> for RowDeserializer<'_, R, S>
     where
         K: DeserializeSeed<'de>,
     {
-        let Some(prop) = self.properties.get(self.current_property as usize) else {
+        let Some(prop) = self.properties.get(self.current_property) else {
             return Ok(None);
         };
         seed.deserialize(BytesDeserializer::new(prop.name.as_bytes()))
@@ -95,10 +95,7 @@ impl<'de, R: Read, S: ScalarReader> MapAccess<'de> for RowDeserializer<'_, R, S>
     where
         V: DeserializeSeed<'de>,
     {
-        // I really hope the bounds check here gets optimized out (next_key_seed already checks).
-        // Could use unsafe here to avoid this but let's not use any unsafe code in a data format,
-        // I am not smart enough :)
-        match self.properties[self.current_property as usize].property_type {
+        match self.properties[self.current_property].property_type {
             PropertyType::Scalar(data_type) => {
                 self.current_property += 1;
                 seed.deserialize(ScalarDeserializer {

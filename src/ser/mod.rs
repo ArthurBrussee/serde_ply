@@ -13,7 +13,7 @@ mod header_collector;
 mod ply_file;
 mod row;
 
-pub mod val_writer;
+pub(crate) mod val_writer;
 
 /// Serialize PLY data to a writer.
 ///
@@ -126,6 +126,7 @@ where
 ///
 /// Builder struct for configuring PLY output format and metadata like comments.
 /// Use the convenience methods like [`Self::ascii()`] for common configurations.
+#[derive(Debug, Clone)]
 pub struct SerializeOptions {
     format: PlyFormat,
     comments: Vec<String>,

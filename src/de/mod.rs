@@ -5,7 +5,7 @@ pub(crate) use row::*;
 pub(crate) mod chunked;
 mod row;
 
-pub mod val_reader;
+pub(crate) mod val_reader;
 use std::io::{BufRead, BufReader, Cursor};
 
 pub use ply_file::PlyReader;

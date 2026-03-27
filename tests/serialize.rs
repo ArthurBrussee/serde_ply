@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_ply::{from_reader, to_bytes, SerializeOptions};
+use serde_ply::{from_reader, to_bytes, to_string, to_writer, SerializeOptions};
 use std::io::Cursor;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -240,4 +240,93 @@ fn test_list_count_types() {
         parsed.face[0].medium_list.0
     );
     assert_eq!(test_data.face[0].large_list.0, parsed.face[0].large_list.0);
+}
+
+#[test]
+fn test_to_string_rejects_binary() {
+    let mesh = Mesh {
+        vertex: vec![],
+        face: vec![],
+    };
+    assert!(to_string(&mesh, SerializeOptions::binary_le()).is_err());
+    assert!(to_string(&mesh, SerializeOptions::binary_be()).is_err());
+}
+
+#[test]
+fn test_to_string_ascii() {
+    let mesh = Mesh {
+        vertex: vec![Vertex {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        }],
+        face: vec![],
+    };
+    let s = to_string(&mesh, SerializeOptions::ascii()).unwrap();
+    assert!(s.starts_with("ply\n"));
+    assert!(s.contains("format ascii 1.0"));
+    assert!(s.contains("element vertex 1"));
+}
+
+#[test]
+fn test_serialize_with_comments_and_obj_info() {
+    let mesh = Mesh {
+        vertex: vec![],
+        face: vec![],
+    };
+    let opts = SerializeOptions::ascii()
+        .with_comments(vec!["test comment".to_string()])
+        .with_obj_info(vec!["info line".to_string()]);
+    let s = to_string(&mesh, opts).unwrap();
+    assert!(s.contains("comment test comment"));
+    assert!(s.contains("obj_info info line"));
+}
+
+#[test]
+fn test_serialize_to_writer() {
+    let mesh = Mesh {
+        vertex: vec![Vertex {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        }],
+        face: vec![],
+    };
+    let mut buf = Vec::new();
+    to_writer(&mesh, SerializeOptions::ascii(), &mut buf).unwrap();
+    let s = String::from_utf8(buf).unwrap();
+    assert!(s.starts_with("ply\n"));
+}
+
+#[test]
+fn roundtrip_single_element_binary() {
+    #[derive(Serialize, Deserialize, Debug, PartialEq)]
+    struct PointCloud {
+        vertex: Vec<Vertex>,
+    }
+
+    let original = PointCloud {
+        vertex: vec![
+            Vertex {
+                x: -1.5,
+                y: 0.0,
+                z: 100.0,
+            },
+            Vertex {
+                x: f32::MIN,
+                y: f32::MAX,
+                z: 0.0,
+            },
+        ],
+    };
+
+    for opts in [
+        SerializeOptions::ascii(),
+        SerializeOptions::binary_le(),
+        SerializeOptions::binary_be(),
+    ] {
+        let bytes = to_bytes(&original, opts).unwrap();
+        let parsed: PointCloud = from_reader(Cursor::new(bytes)).unwrap();
+        assert_eq!(original, parsed);
+    }
 }
