@@ -23,7 +23,8 @@ fn test_missing_format() {
 
 #[test]
 fn test_unknown_format() {
-    let data = "ply\nformat binary_mixed 1.0\nelement vertex 1\nproperty float x\nend_header\n1.0\n";
+    let data =
+        "ply\nformat binary_mixed 1.0\nelement vertex 1\nproperty float x\nend_header\n1.0\n";
     let result = PlyReader::from_reader(Cursor::new(data));
     assert!(result.is_err());
 }
