@@ -213,7 +213,7 @@ impl PlyHeader {
         let mut current_element: Option<ElementDef> = None;
 
         loop {
-            let mut line = String::new();
+            line.clear();
             let bytes_read = reader.read_line(&mut line)?;
             if bytes_read == 0 {
                 return Err(DeserializeError(std::io::Error::new(

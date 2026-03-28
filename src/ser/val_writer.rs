@@ -87,9 +87,10 @@ impl<W: Write, E: ByteOrder> ScalarWriter for BinValWriter<W, E> {
 }
 
 impl<W: Write> AsciiValWriter<W> {
+    #[inline]
     fn write_field(&mut self, val: impl Display) -> Result<(), SerializeError> {
         if !self.first_in_row {
-            write!(self.writer, " ")?;
+            self.writer.write_all(b" ")?;
         }
         self.first_in_row = false;
         write!(self.writer, "{val}")?;
@@ -131,7 +132,7 @@ impl<W: Write> ScalarWriter for AsciiValWriter<W> {
     }
 
     fn write_row_end(&mut self) -> Result<(), SerializeError> {
-        writeln!(self.writer)?;
+        self.writer.write_all(b"\n")?;
         self.first_in_row = true;
         Ok(())
     }

@@ -6,7 +6,7 @@ pub(crate) mod chunked;
 mod row;
 
 pub(crate) mod val_reader;
-use std::io::{BufRead, BufReader, Cursor};
+use std::io::{BufRead, Cursor};
 
 pub use ply_file::PlyReader;
 use serde::Deserialize;
@@ -51,9 +51,7 @@ pub fn from_bytes<'a, T>(bytes: &[u8]) -> Result<T, DeserializeError>
 where
     T: Deserialize<'a>,
 {
-    let cursor = Cursor::new(bytes);
-    let buf_read = BufReader::new(cursor);
-    from_reader(buf_read)
+    from_reader(Cursor::new(bytes))
 }
 
 /// Deserialize PLY data from a string.

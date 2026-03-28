@@ -1,3 +1,4 @@
+use crate::{DeserializeError, ScalarType};
 use std::io::Read;
 use std::marker::PhantomData;
 
@@ -19,9 +20,47 @@ pub(crate) trait ScalarReader {
     fn read_u32(reader: impl Read) -> Result<u32, std::io::Error>;
     fn read_f32(data: impl Read) -> Result<f32, std::io::Error>;
     fn read_f64(reader: impl Read) -> Result<f64, std::io::Error>;
+
+    /// Fixed byte size of a scalar type in the ply file, if known.
+    fn scalar_byte_size(_t: ScalarType) -> Option<usize> {
+        None
+    }
+
+    fn read_count(reader: impl Read, t: ScalarType) -> Result<usize, DeserializeError> {
+        let count: i64 = match t {
+            ScalarType::I8 => Self::read_i8(reader)? as i64,
+            ScalarType::U8 => Self::read_u8(reader)? as i64,
+            ScalarType::I16 => Self::read_i16(reader)? as i64,
+            ScalarType::U16 => Self::read_u16(reader)? as i64,
+            ScalarType::I32 => Self::read_i32(reader)? as i64,
+            ScalarType::U32 => Self::read_u32(reader)? as i64,
+            _ => {
+                return Err(DeserializeError(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "List count cannot be a float",
+                )))
+            }
+        };
+        if count < 0 {
+            return Err(DeserializeError(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Negative list count",
+            )));
+        }
+        Ok(count as usize)
+    }
 }
 
 impl<E: ByteOrder> ScalarReader for BinValReader<E> {
+    fn scalar_byte_size(t: ScalarType) -> Option<usize> {
+        Some(match t {
+            ScalarType::I8 | ScalarType::U8 => 1,
+            ScalarType::I16 | ScalarType::U16 => 2,
+            ScalarType::I32 | ScalarType::U32 | ScalarType::F32 => 4,
+            ScalarType::F64 => 8,
+        })
+    }
+
     fn read_i8(mut reader: impl Read) -> Result<i8, std::io::Error> {
         reader.read_i8()
     }
@@ -135,18 +174,13 @@ impl AsciiValReader {
 
         loop {
             let mut byte = [0u8; 1];
-            match reader.read_exact(&mut byte) {
-                Ok(_) => {
-                    let ch = byte[0] as char;
-                    if ch.is_ascii_whitespace() {
-                        if !token.is_empty() {
-                            break;
-                        }
-                    } else {
-                        token.push(ch);
-                    }
+            reader.read_exact(&mut byte)?;
+            if byte[0].is_ascii_whitespace() {
+                if !token.is_empty() {
+                    break;
                 }
-                Err(e) => return Err(e),
+            } else {
+                token.push(byte[0] as char);
             }
         }
 

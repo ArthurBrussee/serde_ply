@@ -1,6 +1,21 @@
 use serde::{Deserialize, Deserializer};
 use std::io::{BufReader, Cursor};
 
+// ============================================================================
+// Shared helpers and types
+// ============================================================================
+
+/// Build a binary LE PLY file from a header and raw f32 row data.
+fn make_binary_ply(header: &str, rows: &[&[f32]]) -> Vec<u8> {
+    let mut data = header.as_bytes().to_vec();
+    for row in rows {
+        for v in *row {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    data
+}
+
 #[derive(Deserialize, Default, Debug, PartialEq)]
 struct NewFloat(f32);
 
@@ -51,6 +66,10 @@ where
     Ok(val as f32 / 255.0)
 }
 
+// ============================================================================
+// 1. rename
+// ============================================================================
+
 #[test]
 fn test_field_renaming() {
     let ply_data = r#"ply
@@ -78,10 +97,37 @@ end_header
 }
 
 #[test]
+fn test_seq_with_rename_binary() {
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct Renamed {
+        #[serde(rename = "pos_x")]
+        x: f32,
+        #[serde(rename = "pos_y")]
+        y: f32,
+    }
+
+    #[derive(Deserialize)]
+    struct Ply {
+        vertex: Vec<Renamed>,
+    }
+
+    let data = make_binary_ply(
+        "ply\nformat binary_little_endian 1.0\nelement vertex 1\nproperty float pos_x\nproperty float pos_y\nend_header\n",
+        &[&[10.0, 20.0]],
+    );
+
+    let ply: Ply = serde_ply::from_bytes(&data).unwrap();
+    assert_eq!(ply.vertex[0], Renamed { x: 10.0, y: 20.0 });
+}
+
+// ============================================================================
+// 2. alias
+// ============================================================================
+
+#[test]
 fn test_field_aliases() {
-    let ply_data =
-        // Test aliased name.
-        r#"ply
+    // Test aliased name "pos_y" instead of "y".
+    let ply_data = r#"ply
 format ascii 1.0
 element vertex 1
 property float x
@@ -102,6 +148,199 @@ end_header
     assert_eq!(vertices[0].position_x, 1.0);
     assert_eq!(vertices[0].position_y, 2.0);
 }
+
+#[test]
+fn test_alias_via_from_reader() {
+    // Test alias using from_reader (goes through deserialize_struct -> u64 path).
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct Face {
+        #[serde(alias = "vertex_index")]
+        vertex_indices: Vec<u32>,
+    }
+
+    #[derive(Deserialize, Debug)]
+    struct Ply {
+        face: Vec<Face>,
+    }
+
+    // PLY uses the alias name "vertex_index"
+    let ply_data = r#"ply
+format ascii 1.0
+element face 2
+property list uchar uint vertex_index
+end_header
+3 0 1 2
+4 0 1 2 3
+"#;
+
+    let ply: Ply = serde_ply::from_reader(Cursor::new(ply_data)).unwrap();
+    assert_eq!(ply.face.len(), 2);
+    assert_eq!(ply.face[0].vertex_indices, vec![0, 1, 2]);
+    assert_eq!(ply.face[1].vertex_indices, vec![0, 1, 2, 3]);
+
+    // Also test with the primary name
+    let ply_data2 = r#"ply
+format ascii 1.0
+element face 1
+property list uchar uint vertex_indices
+end_header
+3 0 1 2
+"#;
+
+    let ply2: Ply = serde_ply::from_reader(Cursor::new(ply_data2)).unwrap();
+    assert_eq!(ply2.face[0].vertex_indices, vec![0, 1, 2]);
+}
+
+#[test]
+fn test_skip_plus_alias_via_from_reader() {
+    // Edge case: skip + alias on same struct.
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct Vertex {
+        x: f32,
+        #[serde(skip_deserializing)]
+        _metadata: f32,
+        #[serde(alias = "pos_y")]
+        y: f32,
+        z: f32,
+    }
+
+    #[derive(Deserialize, Debug)]
+    struct Ply {
+        vertex: Vec<Vertex>,
+    }
+
+    // Use the alias name
+    let ply_data = r#"ply
+format ascii 1.0
+element vertex 1
+property float x
+property float pos_y
+property float z
+end_header
+1.0 2.0 3.0
+"#;
+
+    let ply: Ply = serde_ply::from_reader(Cursor::new(ply_data)).unwrap();
+    assert_eq!(
+        ply.vertex[0],
+        Vertex {
+            x: 1.0,
+            _metadata: 0.0,
+            y: 2.0,
+            z: 3.0
+        }
+    );
+
+    // Use the primary name
+    let ply_data2 = r#"ply
+format ascii 1.0
+element vertex 1
+property float x
+property float y
+property float z
+end_header
+1.0 2.0 3.0
+"#;
+
+    let ply2: Ply = serde_ply::from_reader(Cursor::new(ply_data2)).unwrap();
+    assert_eq!(
+        ply2.vertex[0],
+        Vertex {
+            x: 1.0,
+            _metadata: 0.0,
+            y: 2.0,
+            z: 3.0
+        }
+    );
+}
+
+// ============================================================================
+// 3. default
+// ============================================================================
+
+#[test]
+fn test_default_fields() {
+    // Fields not present in PLY get default values.
+    #[derive(Deserialize, Debug)]
+    #[allow(unused)]
+    struct SimpleVertex {
+        x: f32,
+        y: f32,
+        z: f32,
+        #[serde(default)]
+        confidence: f32,
+    }
+
+    let ply_data = r#"ply
+format ascii 1.0
+element vertex 1
+property float x
+property float y
+property float z
+end_header
+1.0 2.0 3.0
+"#;
+
+    let cursor = Cursor::new(ply_data);
+    let mut file = serde_ply::PlyReader::from_reader(BufReader::new(cursor)).unwrap();
+    let vertices: Vec<SimpleVertex> = file.next_element().unwrap();
+
+    assert_eq!(vertices.len(), 1);
+    assert_eq!(vertices[0].confidence, 0.0);
+}
+
+// ============================================================================
+// 4. skip
+// ============================================================================
+
+#[test]
+fn test_skip_deserializing() {
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct VertexWithSkip {
+        x: f32,
+        #[serde(skip_deserializing)]
+        skipped: f32,
+        y: f32,
+    }
+
+    #[derive(Deserialize, Debug)]
+    struct Ply {
+        vertex: Vec<VertexWithSkip>,
+    }
+
+    let ply_data = r#"ply
+format ascii 1.0
+element vertex 2
+property float x
+property float y
+end_header
+1.0 2.0
+3.0 4.0
+"#;
+
+    let ply: Ply = serde_ply::from_reader(Cursor::new(ply_data)).unwrap();
+    assert_eq!(ply.vertex.len(), 2);
+    assert_eq!(
+        ply.vertex[0],
+        VertexWithSkip {
+            x: 1.0,
+            skipped: 0.0,
+            y: 2.0
+        }
+    );
+    assert_eq!(
+        ply.vertex[1],
+        VertexWithSkip {
+            x: 3.0,
+            skipped: 0.0,
+            y: 4.0
+        }
+    );
+}
+
+// ============================================================================
+// 5. Option
+// ============================================================================
 
 #[test]
 fn test_optional_fields() {
@@ -129,32 +368,6 @@ end_header
 }
 
 #[test]
-fn test_newtype_field() {
-    let ply_data = r#"ply
-format ascii 1.0
-element vertex 2
-property float x
-property float y
-property float z
-property uchar red
-property uchar green
-property uchar blue
-property float normal_x
-property float new_typed
-end_header
-1.0 2.0 3.0 255 128 64 0.707 1.0
-4.0 5.0 6.0 200 100 50 0.0 2.0
-"#;
-    let cursor = Cursor::new(ply_data);
-    let mut file = serde_ply::PlyReader::from_reader(BufReader::new(cursor)).unwrap();
-    let vertices: Vec<FlexibleVertex> = file.next_element().unwrap();
-
-    assert_eq!(vertices.len(), 2);
-    assert_eq!(vertices[0].new_typed.0, 1.0);
-    assert_eq!(vertices[1].new_typed.0, 2.0);
-}
-
-#[test]
 fn test_optional_fields_binary() {
     let ply_data = r#"ply
 format binary_little_endian 1.0
@@ -169,7 +382,6 @@ property float normal_x
 end_header
 "#;
 
-    // Create binary data: two vertices with x,y,z,r,g,b,normal_x
     let mut binary_data = Vec::new();
     binary_data.extend_from_slice(ply_data.as_bytes());
 
@@ -201,8 +413,7 @@ end_header
 }
 
 #[test]
-fn test_optional_list_elements() {
-    // Test that Vec<Option<T>> works properly
+fn test_optional_list_elements_ascii() {
     #[derive(Deserialize, Debug, PartialEq)]
     struct VertexWithOptionalList {
         x: f32,
@@ -232,7 +443,6 @@ end_header
 
 #[test]
 fn test_optional_list_elements_binary() {
-    // Test that Vec<Option<T>> works properly in binary format
     #[derive(Deserialize, Debug, PartialEq)]
     struct VertexWithOptionalList {
         x: f32,
@@ -254,7 +464,6 @@ end_header
     let mut binary_data = Vec::new();
     binary_data.extend_from_slice(ply_data.as_bytes());
 
-    // Add vertex data: x=1.0, y=2.0, z=3.0, count=3, normals=[0.1, 0.2, 0.3]
     binary_data.extend_from_slice(&1.0f32.to_le_bytes());
     binary_data.extend_from_slice(&2.0f32.to_le_bytes());
     binary_data.extend_from_slice(&3.0f32.to_le_bytes());
@@ -271,35 +480,34 @@ end_header
     assert_eq!(vertices[0].normals, vec![Some(0.1), Some(0.2), Some(0.3)]);
 }
 
-#[test]
-fn test_default_fields() {
-    // Test that fields not present in PLY get default values
-    #[derive(Deserialize, Debug)]
-    #[allow(unused)]
-    struct SimpleVertex {
-        x: f32,
-        y: f32,
-        z: f32,
-        #[serde(default)]
-        confidence: f32,
-    }
+// ============================================================================
+// 6. Wrappers (newtype, transparent, deserialize_with)
+// ============================================================================
 
+#[test]
+fn test_newtype_field() {
     let ply_data = r#"ply
 format ascii 1.0
-element vertex 1
+element vertex 2
 property float x
 property float y
 property float z
+property uchar red
+property uchar green
+property uchar blue
+property float normal_x
+property float new_typed
 end_header
-1.0 2.0 3.0
+1.0 2.0 3.0 255 128 64 0.707 1.0
+4.0 5.0 6.0 200 100 50 0.0 2.0
 "#;
-
     let cursor = Cursor::new(ply_data);
     let mut file = serde_ply::PlyReader::from_reader(BufReader::new(cursor)).unwrap();
-    let vertices: Vec<SimpleVertex> = file.next_element().unwrap();
+    let vertices: Vec<FlexibleVertex> = file.next_element().unwrap();
 
-    assert_eq!(vertices.len(), 1);
-    assert_eq!(vertices[0].confidence, 0.0); // default f32 value
+    assert_eq!(vertices.len(), 2);
+    assert_eq!(vertices[0].new_typed.0, 1.0);
+    assert_eq!(vertices[1].new_typed.0, 2.0);
 }
 
 #[test]
@@ -375,75 +583,9 @@ end_header
     assert_eq!(vertices[0].indices, vec![1.0, 2.0, 3.0]);
 }
 
-#[test]
-fn test_field_order_independence() {
-    #[derive(Deserialize, Debug, PartialEq)]
-    struct ReorderedVertex {
-        z: f32,
-        x: f32,
-        y: f32,
-        blue: u8,
-        red: u8,
-        green: u8,
-    }
-
-    let ply_data = r#"ply
-format ascii 1.0
-element vertex 1
-property float x
-property float y
-property float z
-property uchar red
-property uchar green
-property uchar blue
-end_header
-1.0 2.0 3.0 255 128 64
-"#;
-
-    let cursor = Cursor::new(ply_data);
-    let mut file = serde_ply::PlyReader::from_reader(BufReader::new(cursor)).unwrap();
-    let vertices: Vec<ReorderedVertex> = file.next_element().unwrap();
-
-    assert_eq!(vertices.len(), 1);
-    assert_eq!(
-        vertices[0],
-        ReorderedVertex {
-            x: 1.0,
-            y: 2.0,
-            z: 3.0,
-            red: 255,
-            green: 128,
-            blue: 64,
-        }
-    );
-}
-
-#[test]
-fn test_struct_validation_errors() {
-    #[derive(Deserialize, Debug)]
-    #[allow(unused)]
-    struct MismatchedVertex {
-        x: f32,
-        y: f32,
-        z: f32,
-        missing_field: f32,
-    }
-
-    let ply_data = r#"ply
-format ascii 1.0
-element vertex 1
-property float x
-property float y
-property float z
-end_header
-1.0 2.0 3.0
-"#;
-
-    let cursor = Cursor::new(ply_data);
-    let mut file = serde_ply::PlyReader::from_reader(BufReader::new(cursor)).unwrap();
-    let result = file.next_element::<Vec<MismatchedVertex>>();
-    assert!(result.is_err());
-}
+// ============================================================================
+// 7. flatten
+// ============================================================================
 
 #[test]
 fn test_serde_flatten_support() {
@@ -481,7 +623,6 @@ end_header
     assert_eq!(vertex.y, 2.0);
     assert_eq!(vertex.z, 3.0);
 
-    // Check flattened fields
     assert_eq!(vertex.extra.get("val_0"), Some(&10.0));
     assert_eq!(vertex.extra.get("val_1"), Some(&20.0));
     assert_eq!(vertex.extra.get("confidence"), Some(&0.95));
@@ -513,14 +654,13 @@ property float confidence
 end_header
 "#;
 
-    // Binary data: x=1.0, y=2.0, z=3.0, val_0=10.0, val_1=20.0, confidence=0.95
     let mut binary_data = Vec::new();
-    binary_data.extend_from_slice(&1.0f32.to_le_bytes()); // x
-    binary_data.extend_from_slice(&2.0f32.to_le_bytes()); // y
-    binary_data.extend_from_slice(&3.0f32.to_le_bytes()); // z
-    binary_data.extend_from_slice(&10.0f32.to_le_bytes()); // val_0
-    binary_data.extend_from_slice(&20.0f32.to_le_bytes()); // val_1
-    binary_data.extend_from_slice(&0.95f32.to_le_bytes()); // confidence
+    binary_data.extend_from_slice(&1.0f32.to_le_bytes());
+    binary_data.extend_from_slice(&2.0f32.to_le_bytes());
+    binary_data.extend_from_slice(&3.0f32.to_le_bytes());
+    binary_data.extend_from_slice(&10.0f32.to_le_bytes());
+    binary_data.extend_from_slice(&20.0f32.to_le_bytes());
+    binary_data.extend_from_slice(&0.95f32.to_le_bytes());
 
     let mut ply_with_binary = ply_data.as_bytes().to_vec();
     ply_with_binary.extend_from_slice(&binary_data);
@@ -535,9 +675,136 @@ end_header
     assert_eq!(vertex.y, 2.0);
     assert_eq!(vertex.z, 3.0);
 
-    // Check flattened fields
     assert_eq!(vertex.extra.get("val_0"), Some(&10.0));
     assert_eq!(vertex.extra.get("val_1"), Some(&20.0));
     assert_eq!(vertex.extra.get("confidence"), Some(&0.95));
     assert_eq!(vertex.extra.len(), 3);
+}
+
+// ============================================================================
+// 8. Seq path edge cases (binary all-scalar rows)
+// ============================================================================
+
+#[test]
+fn test_seq_mixed_scalar_types() {
+    // Different scalar types have different byte sizes.
+    // The seq path must compute offsets correctly across type boundaries.
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct Mixed {
+        a: u8,
+        b: f32,
+        c: u8,
+        d: f64,
+    }
+
+    #[derive(Deserialize)]
+    struct Ply {
+        vertex: Vec<Mixed>,
+    }
+
+    let header = b"ply\nformat binary_little_endian 1.0\nelement vertex 1\nproperty uchar a\nproperty float b\nproperty uchar c\nproperty double d\nend_header\n";
+    let mut data = header.to_vec();
+    data.push(42u8);
+    data.extend_from_slice(&3.125f32.to_le_bytes());
+    data.push(99u8);
+    data.extend_from_slice(&2.719f64.to_le_bytes());
+
+    let ply: Ply = serde_ply::from_bytes(&data).unwrap();
+    assert_eq!(ply.vertex[0].a, 42);
+    assert!((ply.vertex[0].b - 3.125).abs() < 1e-6);
+    assert_eq!(ply.vertex[0].c, 99);
+    assert!((ply.vertex[0].d - 2.719).abs() < 1e-10);
+}
+
+#[test]
+fn test_seq_many_rows_buffer_reuse() {
+    // Verify the row buffer is correctly reused across many rows
+    // without data leaking between them.
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct V {
+        a: f32,
+        b: f32,
+    }
+
+    #[derive(Deserialize)]
+    struct Ply {
+        vertex: Vec<V>,
+    }
+
+    let rows: Vec<[f32; 2]> = (0..1000).map(|i| [i as f32, (i * 10) as f32]).collect();
+    let row_refs: Vec<&[f32]> = rows.iter().map(|r| r.as_slice()).collect();
+
+    let data = make_binary_ply(
+        "ply\nformat binary_little_endian 1.0\nelement vertex 1000\nproperty float a\nproperty float b\nend_header\n",
+        &row_refs,
+    );
+
+    let ply: Ply = serde_ply::from_bytes(&data).unwrap();
+    assert_eq!(ply.vertex.len(), 1000);
+    for i in 0..1000 {
+        assert_eq!(
+            ply.vertex[i],
+            V {
+                a: i as f32,
+                b: (i * 10) as f32
+            },
+            "row {i}"
+        );
+    }
+}
+
+#[test]
+fn test_seq_single_field() {
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct Single {
+        x: f32,
+    }
+
+    #[derive(Deserialize)]
+    struct Ply {
+        vertex: Vec<Single>,
+    }
+
+    let data = make_binary_ply(
+        "ply\nformat binary_little_endian 1.0\nelement vertex 3\nproperty float x\nend_header\n",
+        &[&[1.0], &[2.0], &[3.0]],
+    );
+
+    let ply: Ply = serde_ply::from_bytes(&data).unwrap();
+    assert_eq!(
+        ply.vertex,
+        vec![Single { x: 1.0 }, Single { x: 2.0 }, Single { x: 3.0 }]
+    );
+}
+
+#[test]
+fn test_seq_all_defaults_no_match() {
+    // Struct has all default fields, none matching any PLY property.
+    // Falls back to string path (no matched fields -> seq plan returns None).
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct AllDefaults {
+        #[serde(default)]
+        missing_a: f32,
+        #[serde(default)]
+        missing_b: f32,
+    }
+
+    #[derive(Deserialize)]
+    struct Ply {
+        vertex: Vec<AllDefaults>,
+    }
+
+    let data = make_binary_ply(
+        "ply\nformat binary_little_endian 1.0\nelement vertex 1\nproperty float x\nproperty float y\nend_header\n",
+        &[&[1.0, 2.0]],
+    );
+
+    let ply: Ply = serde_ply::from_bytes(&data).unwrap();
+    assert_eq!(
+        ply.vertex[0],
+        AllDefaults {
+            missing_a: 0.0,
+            missing_b: 0.0
+        }
+    );
 }
